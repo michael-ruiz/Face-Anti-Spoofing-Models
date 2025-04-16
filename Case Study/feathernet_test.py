@@ -120,39 +120,49 @@ class FeatherNetB(nn.Module):
 class FeatherNetPAD(nn.Module):
     def __init__(self, num_classes=1, width_mult=1.0, scale=1.0, pretrained=True):
         super(FeatherNetPAD, self).__init__()
-        # Initialize the FeatherNetB model
-        self.feathernet = FeatherNetB(num_classes=1000, width_mult=width_mult, scale=scale)  # Initially 1000 classes for ImageNet
+        # Initialize backbone
+        self.feathernet = FeatherNetB(num_classes=1000, width_mult=width_mult, scale=scale)
         
         if pretrained:
-            # Load pretrained weights
-            weights_path = "./pretrained/feathernet_best.pth.tar"            
-            # Load pretrained weights
-            pretrained_dict = torch.load(weights_path, map_location='cpu')
-            model_dict = self.feathernet.state_dict()
-            
-            # Filter out classifier weights
-            pretrained_dict = {k: v for k, v in pretrained_dict.items() 
-                             if k in model_dict and 'classifier' not in k}
-            model_dict.update(pretrained_dict)
-            self.feathernet.load_state_dict(model_dict)
-            print("Loaded pretrained FeatherNet weights")
+            try:
+                weights_path = "./pretrained/feathernet_best.pth.tar"
+                pretrained_dict = torch.load(weights_path, map_location='cpu')
+                model_dict = self.feathernet.state_dict()
+                pretrained_dict = {k: v for k, v in pretrained_dict.items() 
+                                 if k in model_dict and 'classifier' not in k}
+                model_dict.update(pretrained_dict)
+                self.feathernet.load_state_dict(model_dict)
+                print("Loaded pretrained FeatherNet weights")
+            except Exception as e:
+                print(f"Error loading pretrained weights: {e}")
         
-        # Freeze backbone layers
+        # Freeze backbone initially
         for param in self.feathernet.parameters():
             param.requires_grad = False
-            
-        # Replace classifier for PAD task
-        feature_dim = int(1024 * width_mult * 7 * 7)
+        
+        # Feature dimension
+        feature_dim = int(1024 * width_mult)
+        
+        # Modified attention mechanism
         self.attention = nn.Sequential(
-            nn.Dropout(0.1),
-            nn.Linear(feature_dim, int(512 * width_mult)),
+            nn.Linear(feature_dim, 512),
+            nn.BatchNorm1d(512),
             nn.ReLU(inplace=True),
-            nn.Linear(int(512 * width_mult), num_classes)
+            nn.Dropout(0.5),
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.3),
+            nn.Linear(256, 1)
         )
         
+        # Modified classifier
         self.classifier = nn.Sequential(
-            nn.Dropout(0.2),
-            nn.Linear(int(1024 * width_mult), num_classes)
+            nn.Linear(feature_dim, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.5),
+            nn.Linear(512, num_classes)
         )
     
     def unfreeze_layers(self, num_layers=None):
@@ -167,29 +177,23 @@ class FeatherNetPAD(nn.Module):
             for name, param in reversed(layers[:num_layers]):
                 param.requires_grad = True
                 print(f"Unfroze layer: {name}")
-        
+
     def forward(self, x):
-        # Extract features from FeatherNetB
+        # Get features
         x = self.feathernet.conv1(x)
-        x = self.feathernet.features[:-1](x)  # Exclude global pooling
+        features = self.feathernet.features[:-1](x)  # Skip global pooling
         
-        # Store the original shape for attention
-        batch_size, channels, height, width = x.shape
+        # Global average pooling
+        features = torch.mean(features, dim=(2, 3))  # (batch_size, channels)
         
-        # Calculate attention weights
-        # Flatten the spatial dimensions for attention
-        flattened = x.view(batch_size, -1)
-        attention_weights = torch.sigmoid(self.attention(flattened))
+        # Get attention weights
+        attention = torch.sigmoid(self.attention(features))
         
-        # Apply global pooling and continue with classification
-        x = self.feathernet.features[-1](x)  # Global pooling
-        x = x.view(x.size(0), -1)
-        x = self.classifier(x)
+        # Get classification output
+        out = self.classifier(features)
         
-        # Weight the output with attention
-        x = x * attention_weights
-        
-        return x
+        # Apply attention
+        return out * attention
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs=10, device='cuda'):
     """Training function for the PAD model"""
@@ -225,6 +229,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
             
             # Backward pass and optimize
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
             # Statistics
@@ -282,7 +287,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val AUC: {val_auc:.4f}')
         
         # Step the scheduler
-        scheduler.step()
+        if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(val_auc)
+        else:
+            scheduler.step()
         
         # Save best model
         if val_auc > best_auc:
@@ -291,7 +299,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
                 'val_auc': val_auc,
+                'val_acc': val_acc,
             }, './new_models/best_model_feathernet_pad.pth')
             print(f'New best model saved with AUC: {val_auc:.4f}')
     
@@ -422,12 +432,18 @@ if __name__ == '__main__':
     
     # Phase 1: Train only the new layers
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam([
-        {'params': model.attention.parameters()},
-        {'params': model.classifier.parameters()}
-    ], lr=0.001)
-    
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+    optimizer = optim.AdamW([
+        {'params': model.attention.parameters(), 'lr': 3e-4},
+        {'params': model.classifier.parameters(), 'lr': 3e-4}
+    ], weight_decay=0.01)
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='max',
+        factor=0.5,
+        patience=3, 
+        verbose=True
+    )
     
     print("Phase 1: Training new layers...")
     model, history_phase1 = train_model(
@@ -445,13 +461,19 @@ if __name__ == '__main__':
     print("Phase 2: Fine-tuning...")
     model.unfreeze_layers(num_layers=10)  # Unfreeze last 10 layers
     
-    optimizer = optim.Adam([
-        {'params': model.feathernet.parameters(), 'lr': 1e-5},
-        {'params': model.attention.parameters(), 'lr': 1e-4},
-        {'params': model.classifier.parameters(), 'lr': 1e-4}
-    ])
-    
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+    optimizer = optim.AdamW([
+        {'params': model.feathernet.parameters(), 'lr': 1e-4},
+        {'params': model.attention.parameters(), 'lr': 3e-4},
+        {'params': model.classifier.parameters(), 'lr': 3e-4}
+    ], weight_decay=0.01)
+
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='max',
+        factor=0.5,
+        patience=3,
+        verbose=True
+    )
     
     model, history_phase2 = train_model(
         model=model,

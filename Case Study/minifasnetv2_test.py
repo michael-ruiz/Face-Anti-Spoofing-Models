@@ -153,15 +153,13 @@ class MiniFASNetV2PAD(nn.Module):
         features = self.backbone.fc(x.view(x.size(0), -1))
         
         # Calculate attention weights
-        attention = self.attention(features)
+        attention = torch.sigmoid(self.attention(features))
         
         # Get classification output
         out = self.backbone.classifier(features)
         
         # Apply attention weights
-        out = out * attention
-        
-        return out
+        return out * attention
     
     def freeze_backbone(self):
         """Freeze all backbone layers"""
@@ -207,6 +205,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
             
             # Backward pass and optimize
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
             # Calculate training statistics
@@ -264,7 +263,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val AUC: {val_auc:.4f}')
         
         # Step the scheduler
-        scheduler.step()
+        if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(val_auc)  # Use AUC for scheduling
+        else:
+            scheduler.step()
         
         # Save best model
         if val_auc > best_auc:
@@ -273,7 +275,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
                 'val_auc': val_auc,
+                'val_acc': val_acc,
             }, './new_models/best_model_minifasnetv2_pad.pth')
             print(f'New best model saved with AUC: {val_auc:.4f}')
     
@@ -403,12 +407,18 @@ if __name__ == '__main__':
     
     # Phase 1: Train only the new layers
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam([
-        {'params': model.attention.parameters()},
-        {'params': model.backbone.classifier.parameters()}
-    ], lr=0.001)
+    optimizer = optim.AdamW([
+        {'params': model.attention.parameters(), 'lr': 3e-4},
+        {'params': model.backbone.classifier.parameters(), 'lr': 3e-4}
+    ], weight_decay=0.01)
     
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='max',
+        factor=0.1,
+        patience=3,
+        verbose=True
+    )
     
     print("Phase 1: Training new layers...")
     model, history_phase1 = train_model(
@@ -442,13 +452,19 @@ if __name__ == '__main__':
                 backbone_params.append(param)
 
     # Create optimizer with distinct parameter groups
-    optimizer = optim.Adam([
-        {'params': backbone_params, 'lr': 1e-5},
-        {'params': attention_params, 'lr': 1e-4},
-        {'params': classifier_params, 'lr': 1e-4}
-    ])
+    optimizer = optim.AdamW([
+        {'params': backbone_params, 'lr': 1e-4},
+        {'params': attention_params, 'lr': 3e-4},
+        {'params': classifier_params, 'lr': 3e-4}
+    ], weight_decay=0.01)
     
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode='max',
+        factor=0.1,
+        patience=3,
+        verbose=True
+    )
     
     model, history_phase2 = train_model(
         model=model,
