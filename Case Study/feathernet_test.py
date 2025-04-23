@@ -1,14 +1,12 @@
-import os
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
-from sklearn.metrics import roc_curve, auc
+from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-import h5py
 from VFPAD_data import VFPADDataset, VFPADTorchDataset
 
 
@@ -203,7 +201,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         'val_loss': [],
         'val_auc': [],
         'train_acc': [],
-        'val_acc': []
+        'val_acc': [],
+        'val_precision': [],
+        'val_recall': [],
+        'val_f1': []
     }
     
     for epoch in range(num_epochs):
@@ -253,6 +254,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         total_val = 0
         all_labels = []
         all_scores = []
+        all_preds = []
         
         with torch.no_grad():
             for inputs, labels in tqdm(val_loader, desc='Validation'):
@@ -262,29 +264,37 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
                 scores = torch.sigmoid(outputs)
+                predicted = (scores > 0.5).float()
                 
                 running_loss += loss.item() * inputs.size(0)
-                predicted = (scores > 0.5).float()
                 total_val += labels.size(0)
                 correct_val += (predicted == labels).sum().item()
                 
                 all_labels.extend(labels.cpu().numpy())
                 all_scores.extend(scores.cpu().numpy())
+                all_preds.extend(predicted.cpu().numpy())
         
         # Calculate validation metrics
         val_loss = running_loss / len(val_loader.dataset)
         val_acc = correct_val / total_val
         fpr, tpr, _ = roc_curve(all_labels, all_scores)
         val_auc = auc(fpr, tpr)
+        val_precision = precision_score(all_labels, all_preds)
+        val_recall = recall_score(all_labels, all_preds)
+        val_f1 = f1_score(all_labels, all_preds)
         
         # Store validation metrics
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
         history['val_auc'].append(val_auc)
+        history['val_precision'].append(val_precision)
+        history['val_recall'].append(val_recall)
+        history['val_f1'].append(val_f1)
         
         # Print epoch metrics
         print(f'Train Loss: {epoch_loss:.4f}, Train Acc: {epoch_acc:.4f}')
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val AUC: {val_auc:.4f}')
+        print(f'Val Precision: {val_precision:.4f}, Val Recall: {val_recall:.4f}, Val F1: {val_f1:.4f}')
         
         # Step the scheduler
         if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
@@ -307,16 +317,14 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     
     return model, history
 
-
-
 def plot_training_history(history):
     """Plot training and validation metrics"""
     epochs = range(1, len(history['train_loss']) + 1)
     
-    plt.figure(figsize=(15, 5))
+    plt.figure(figsize=(20, 5))
     
     # Plot loss
-    plt.subplot(1, 3, 1)
+    plt.subplot(1, 4, 1)
     plt.plot(epochs, history['train_loss'], 'b-', label='Training Loss')
     plt.plot(epochs, history['val_loss'], 'r-', label='Validation Loss')
     plt.title('Training and Validation Loss')
@@ -325,7 +333,7 @@ def plot_training_history(history):
     plt.legend()
     
     # Plot accuracy
-    plt.subplot(1, 3, 2)
+    plt.subplot(1, 4, 2)
     plt.plot(epochs, history['train_acc'], 'b-', label='Training Acc')
     plt.plot(epochs, history['val_acc'], 'r-', label='Validation Acc')
     plt.title('Training and Validation Accuracy')
@@ -334,11 +342,21 @@ def plot_training_history(history):
     plt.legend()
     
     # Plot AUC
-    plt.subplot(1, 3, 3)
+    plt.subplot(1, 4, 3)
     plt.plot(epochs, history['val_auc'], 'g-', label='Validation AUC')
     plt.title('Validation AUC')
     plt.xlabel('Epochs')
     plt.ylabel('AUC')
+    plt.legend()
+    
+    # Plot Precision, Recall, F1
+    plt.subplot(1, 4, 4)
+    plt.plot(epochs, history['val_precision'], 'r-', label='Precision')
+    plt.plot(epochs, history['val_recall'], 'g-', label='Recall')
+    plt.plot(epochs, history['val_f1'], 'b-', label='F1-Score')
+    plt.title('Validation Metrics')
+    plt.xlabel('Epochs')
+    plt.ylabel('Score')
     plt.legend()
     
     plt.tight_layout()
@@ -491,7 +509,10 @@ if __name__ == '__main__':
         'val_loss': history_phase1['val_loss'] + history_phase2['val_loss'],
         'train_acc': history_phase1['train_acc'] + history_phase2['train_acc'],
         'val_acc': history_phase1['val_acc'] + history_phase2['val_acc'],        
-        'val_auc': history_phase1['val_auc'] + history_phase2['val_auc']
+        'val_auc': history_phase1['val_auc'] + history_phase2['val_auc'],
+        'val_precision': history_phase1['val_precision'] + history_phase2['val_precision'],
+        'val_recall': history_phase1['val_recall'] + history_phase2['val_recall'],
+        'val_f1': history_phase1['val_f1'] + history_phase2['val_f1']
     }
 
     print("\nComputing ROC curve...")
