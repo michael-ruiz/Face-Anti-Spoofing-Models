@@ -86,7 +86,7 @@ class MobileNetPAD(nn.Module):
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs=10, device='cuda'):
     '''Training function with validation'''
-    best_auc = 0.0
+    best_acer = float('inf')
     history = {
         'train_loss': [],
         'val_loss': [],
@@ -95,7 +95,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         'val_acc': [],
         'val_precision': [],
         'val_recall': [],
-        'val_f1': []
+        'val_f1': [],
+        'val_far': [],
+        'val_frr': [],
+        'val_acer': []
     }
     
     for epoch in range(num_epochs):
@@ -166,6 +169,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         val_precision = precision_score(all_labels, all_preds)
         val_recall = recall_score(all_labels, all_preds)
         val_f1 = f1_score(all_labels, all_preds)
+        val_far, val_frr, val_acer = calculate_far_frr_acer(all_labels, all_preds)
         
         history['val_loss'].append(val_loss)
         history['val_acc'].append(val_acc)
@@ -173,25 +177,31 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         history['val_precision'].append(val_precision)
         history['val_recall'].append(val_recall)
         history['val_f1'].append(val_f1)
+        history['val_far'].append(val_far)
+        history['val_frr'].append(val_frr)
+        history['val_acer'].append(val_acer)
         
         # Print epoch metrics
         print(f'Train Loss: {epoch_loss:.4f}, Train Acc: {epoch_acc:.4f}')
         print(f'Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, Val AUC: {val_auc:.4f}')
         print(f'Val Precision: {val_precision:.4f}, Val Recall: {val_recall:.4f}, Val F1: {val_f1:.4f}')
+        print(f'Val FAR: {val_far:.4f}, Val FRR: {val_frr:.4f}, Val ACER: {val_acer:.4f}')
         
         scheduler.step()
         
         # Save best model
-        if val_auc > best_auc:
-            best_auc = val_auc
+        if val_acer < best_acer:
+            best_acer = val_acer
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
                 'val_auc': val_auc,
                 'val_acc': val_acc,
-            }, 'new_models/best_model_mobilenetv3_pad.pth')
-            print(f'New best model saved with AUC: {val_auc:.4f}')
+                'val_acer': val_acer,
+            }, './new_models/best_model_mobilenetv3_pad.pth')
+            print(f'New best model saved with ACER: {val_acer:.4f}')
     
     return model, history
 
@@ -199,10 +209,10 @@ def plot_training_history(history):
     """Plot training and validation metrics"""
     epochs = range(1, len(history['train_loss']) + 1)
     
-    plt.figure(figsize=(20, 5))
+    plt.figure(figsize=(20, 10))
     
-    # Plot loss
-    plt.subplot(1, 4, 1)
+    # First row
+    plt.subplot(2, 4, 1)
     plt.plot(epochs, history['train_loss'], 'b-', label='Training Loss')
     plt.plot(epochs, history['val_loss'], 'r-', label='Validation Loss')
     plt.title('Training and Validation Loss')
@@ -210,8 +220,7 @@ def plot_training_history(history):
     plt.ylabel('Loss')
     plt.legend()
     
-    # Plot accuracy
-    plt.subplot(1, 4, 2)
+    plt.subplot(2, 4, 2)
     plt.plot(epochs, history['train_acc'], 'b-', label='Training Acc')
     plt.plot(epochs, history['val_acc'], 'r-', label='Validation Acc')
     plt.title('Training and Validation Accuracy')
@@ -219,16 +228,14 @@ def plot_training_history(history):
     plt.ylabel('Accuracy')
     plt.legend()
     
-    # Plot AUC
-    plt.subplot(1, 4, 3)
+    plt.subplot(2, 4, 3)
     plt.plot(epochs, history['val_auc'], 'g-', label='Validation AUC')
     plt.title('Validation AUC')
     plt.xlabel('Epochs')
     plt.ylabel('AUC')
     plt.legend()
     
-    # Plot Precision, Recall, F1
-    plt.subplot(1, 4, 4)
+    plt.subplot(2, 4, 4)
     plt.plot(epochs, history['val_precision'], 'r-', label='Precision')
     plt.plot(epochs, history['val_recall'], 'g-', label='Recall')
     plt.plot(epochs, history['val_f1'], 'b-', label='F1-Score')
@@ -237,8 +244,18 @@ def plot_training_history(history):
     plt.ylabel('Score')
     plt.legend()
     
+    # Second row - ACER plots
+    plt.subplot(2, 4, 6)
+    plt.plot(epochs, history['val_far'], 'r-', label='FAR')
+    plt.plot(epochs, history['val_frr'], 'g-', label='FRR')
+    plt.plot(epochs, history['val_acer'], 'b-', label='ACER')
+    plt.title('FAR/FRR/ACER Metrics')
+    plt.xlabel('Epochs')
+    plt.ylabel('Rate')
+    plt.legend()
+    
     plt.tight_layout()
-    plt.savefig('mobilenet_training_history.png')
+    plt.savefig('mobiletnetv3_training_history.png')
     plt.show()
 
 def plot_roc_curve(model, val_loader, device):
@@ -279,6 +296,27 @@ def plot_roc_curve(model, val_loader, device):
     
     return roc_auc, fpr, tpr, thresholds
 
+def calculate_far_frr_acer(labels, predictions):
+    """Calculate FAR, FRR and ACER metrics"""
+    # Convert to numpy arrays if needed
+    labels = np.array(labels)
+    predictions = np.array(predictions)
+    
+    # Real/Genuine samples (label = 1)
+    real_samples = (labels == 1)
+    # Attack/Spoof samples (label = 0)
+    attack_samples = (labels == 0)
+    
+    # False Rejection Rate (FRR): False negative rate for real samples
+    frr = np.sum((predictions == 0) & real_samples) / np.sum(real_samples)
+    
+    # False Acceptance Rate (FAR): False positive rate for attack samples
+    far = np.sum((predictions == 1) & attack_samples) / np.sum(attack_samples)
+    
+    # Average Classification Error Rate (ACER)
+    acer = (far + frr) / 2
+    
+    return far, frr, acer
 
 if __name__ == '__main__':
     # Set device and print info
@@ -398,7 +436,10 @@ if __name__ == '__main__':
         'val_auc': history_phase1['val_auc'] + history_phase2['val_auc'],
         'val_precision': history_phase1['val_precision'] + history_phase2['val_precision'],
         'val_recall': history_phase1['val_recall'] + history_phase2['val_recall'],
-        'val_f1': history_phase1['val_f1'] + history_phase2['val_f1']
+        'val_f1': history_phase1['val_f1'] + history_phase2['val_f1'],
+        'val_far': history_phase1['val_far'] + history_phase2['val_far'],
+        'val_frr': history_phase1['val_frr'] + history_phase2['val_frr'],
+        'val_acer': history_phase1['val_acer'] + history_phase2['val_acer']
     }
 
     print('\nComputing ROC curve...')
