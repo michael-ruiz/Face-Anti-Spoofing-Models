@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from VFPAD_data import VFPADDataset, VFPADTorchDataset
+from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
 
 
 # FeatherNetB for PAD
@@ -375,7 +375,7 @@ def plot_training_history(history):
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig('feathernet_training_history.png')
+    plt.savefig('./results/feathernet_training_history.png')
     plt.show()
 
 def plot_roc_curve(model, val_loader, device):
@@ -411,7 +411,7 @@ def plot_roc_curve(model, val_loader, device):
     plt.title('Receiver Operating Characteristic (ROC) Curve')
     plt.legend(loc="lower right")
     plt.grid(True)
-    plt.savefig('feathernet_roc_curve.png')
+    plt.savefig('./results/feathernet_roc_curve.png')
     plt.show()
     
     return roc_auc, fpr, tpr, thresholds

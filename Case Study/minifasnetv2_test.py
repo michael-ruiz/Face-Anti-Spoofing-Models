@@ -7,7 +7,7 @@ import torchvision.transforms as transforms
 from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from VFPAD_data import VFPADDataset, VFPADTorchDataset
+from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
 
 class MiniFASNetV2(nn.Module):
     def __init__(self, num_classes=1, embedding_size=128, channels=32):
@@ -75,7 +75,7 @@ class MiniFASNetV2PAD(nn.Module):
             try:
                 # Load pretrained weights
                 weights_path = "./pretrained/MiniFASNetV2.pth"
-                pretrained_dict = torch.load(weights_path, map_location='cpu')
+                pretrained_dict = torch.load(weights_path, map_location='cpu', weights_only=True)
                 model_dict = self.backbone.state_dict()
                 
                 # Filter out unnecessary weights
@@ -353,7 +353,7 @@ def plot_training_history(history):
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig('minifasnet_training_history.png')
+    plt.savefig('./results/minifasnet_training_history.png')
     plt.show()
 
 def plot_roc_curve(model, val_loader, device):
@@ -389,7 +389,7 @@ def plot_roc_curve(model, val_loader, device):
     plt.title('Receiver Operating Characteristic (ROC) Curve')
     plt.legend(loc="lower right")
     plt.grid(True)
-    plt.savefig('minifasnetv2_roc_curve.png')
+    plt.savefig('./results/minifasnetv2_roc_curve.png')
     plt.show()
     
     return roc_auc, fpr, tpr, thresholds

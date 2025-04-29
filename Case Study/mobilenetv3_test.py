@@ -8,13 +8,13 @@ from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_sc
 import matplotlib.pyplot as plt
 from torchvision.models import mobilenet_v3_small
 from tqdm import tqdm
-from VFPAD_data import VFPADDataset, VFPADTorchDataset
+from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
 
 class MobileNetPAD(nn.Module):
     def __init__(self, pretrained=True, num_classes=1):
         super(MobileNetPAD, self).__init__()
         # Load MobileNetV3-Small
-        self.backbone = mobilenet_v3_small(pretrained=pretrained)
+        self.backbone = mobilenet_v3_small(pretrained=pretrained, weights='MobileNet_V3_Small_Weights.IMAGENET1K_V1')
         
         # Get the number of features from the last layer
         in_features = self.backbone.classifier[0].in_features
@@ -255,7 +255,7 @@ def plot_training_history(history):
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig('mobiletnetv3_training_history.png')
+    plt.savefig('./results/mobiletnetv3_training_history.png')
     plt.show()
 
 def plot_roc_curve(model, val_loader, device):
@@ -291,7 +291,7 @@ def plot_roc_curve(model, val_loader, device):
     plt.title('Receiver Operating Characteristic (ROC) Curve')
     plt.legend(loc='lower right')
     plt.grid(True)
-    plt.savefig('mobilenetv3_roc_curve.png')
+    plt.savefig('./results/mobilenetv3_roc_curve.png')
     plt.show()
     
     return roc_auc, fpr, tpr, thresholds
