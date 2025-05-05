@@ -30,7 +30,7 @@ def evaluate_model(model, test_loader, device):
             scores = torch.sigmoid(outputs)
             
             all_labels.extend(labels.cpu().numpy())
-            all_scores.extend(scores)
+            all_scores.extend(scores.cpu().numpy())
     
     all_labels = np.array(all_labels)
     all_scores = np.array(all_scores)
