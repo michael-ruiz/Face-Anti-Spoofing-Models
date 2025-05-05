@@ -24,10 +24,10 @@ def evaluate_model(model, test_loader, device):
     with torch.no_grad():
         for inputs, labels in tqdm(test_loader, desc="Testing"):
             inputs = inputs.to(device)
-            labels = labels.to(device)
+            labels = labels.float().to(device).unsqueeze(1)
             
             outputs = model(inputs)
-            scores = torch.sigmoid(outputs).cpu().numpy()
+            scores = torch.sigmoid(outputs)
             
             all_labels.extend(labels.cpu().numpy())
             all_scores.extend(scores)

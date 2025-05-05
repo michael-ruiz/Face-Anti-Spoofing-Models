@@ -10,9 +10,9 @@ from torchvision.models import mobilenet_v3_small
 from tqdm import tqdm
 from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
 
-class MobileNetPAD(nn.Module):
+class MobileNetV3PAD(nn.Module):
     def __init__(self, pretrained=True, num_classes=1):
-        super(MobileNetPAD, self).__init__()
+        super(MobileNetV3PAD, self).__init__()
         # Load MobileNetV3-Small
         self.backbone = mobilenet_v3_small(pretrained=pretrained, weights='MobileNet_V3_Small_Weights.IMAGENET1K_V1')
         
@@ -380,7 +380,7 @@ if __name__ == '__main__':
         raise ValueError('Validation dataset is empty!')
     
     # Initialize model with pretrained weights
-    model = MobileNetPAD(pretrained=True, num_classes=1)
+    model = MobileNetV3PAD(pretrained=True, num_classes=1)
     model = model.to(device)
     print('Model initialized and moved to device')
     
