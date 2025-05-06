@@ -2,97 +2,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-import timm
 from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
-
-class MobileNetV4PAD(nn.Module):
-    def __init__(self, num_classes=1, pretrained=True):
-        super(MobileNetV4PAD, self).__init__()
-        # Load pretrained MobileNetV4 without classifier
-        self.backbone = timm.create_model(
-            'mobilenetv4_conv_small.e2400_r224_in1k', 
-            pretrained=pretrained,
-            features_only=True,  # Get intermediate features
-            out_indices=(4,)     # Only get the last feature map
-        )
-        
-        # Get feature dimension from the last layer
-        dummy_input = torch.randn(1, 3, 224, 224)
-        features = self.backbone(dummy_input)
-        feature_dim = features[0].shape[1]
-        
-        # Global average pooling
-        self.gap = nn.AdaptiveAvgPool2d(1)
-        
-        # Attention mechanism
-        self.attention = nn.Sequential(
-            nn.Linear(feature_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.SiLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.SiLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-        
-        # Classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(feature_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.SiLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, num_classes)
-        )
-        
-        if pretrained:
-            # Freeze backbone initially
-            for param in self.backbone.parameters():
-                param.requires_grad = False
-
-    def unfreeze_layers(self, num_layers=None):
-        """Unfreeze layers for fine-tuning"""
-        if num_layers is None:
-            # Unfreeze all backbone layers
-            for param in self.backbone.parameters():
-                param.requires_grad = True
-        else:
-            # Unfreeze last n layers
-            layers = list(self.backbone.named_parameters())
-            for name, param in reversed(layers[:num_layers]):
-                param.requires_grad = True
-                print(f"Unfroze layer: {name}")
-
-    def forward(self, x):
-        # Get features from backbone (now returns a tuple with one tensor)
-        features = self.backbone(x)
-        
-        # Use the single feature map
-        x = features[0]
-        
-        # Global average pooling
-        x = self.gap(x)
-        x = torch.flatten(x, 1)
-        
-        # Apply attention
-        attention = self.attention(x)
-        
-        # Get classification output
-        out = self.classifier(x)
-        
-        # Apply attention
-        return out * attention
-
+from models.mobilenetv3 import MobileNetV3PAD
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs=10, device='cuda'):
-    """Training function for the PAD model"""
+    '''Training function with validation'''
     best_acer = float('inf')
     history = {
         'train_loss': [],
@@ -109,7 +28,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
     }
     
     for epoch in range(num_epochs):
-        print(f'\nEpoch {epoch+1}/{num_epochs}')
+        print(f'Epoch {epoch+1}/{num_epochs}')
         print('-' * 10)
         
         # Training phase
@@ -122,19 +41,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
             inputs = inputs.to(device)
             labels = labels.float().to(device).unsqueeze(1)
             
-            # Zero the parameter gradients
             optimizer.zero_grad()
-            
-            # Forward pass
             outputs = model(inputs)
             loss = criterion(outputs, labels)
-            
-            # Backward pass and optimize
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
-            # Statistics
+            # Calculate training accuracy
             running_loss += loss.item() * inputs.size(0)
             predicted = (torch.sigmoid(outputs) > 0.5).float()
             total_train += labels.size(0)
@@ -144,7 +57,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         epoch_loss = running_loss / len(train_loader.dataset)
         epoch_acc = correct_train / total_train
         
-        # Store training metrics
         history['train_loss'].append(epoch_loss)
         history['train_acc'].append(epoch_acc)
         
@@ -201,11 +113,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         print(f'Val Precision: {val_precision:.4f}, Val Recall: {val_recall:.4f}, Val F1: {val_f1:.4f}')
         print(f'Val FAR: {val_far:.4f}, Val FRR: {val_frr:.4f}, Val ACER: {val_acer:.4f}')
         
-        # Step the scheduler
-        if isinstance(scheduler, optim.lr_scheduler.ReduceLROnPlateau):
-            scheduler.step(val_auc)
-        else:
-            scheduler.step()
+        scheduler.step()
         
         # Save best model
         if val_acer < best_acer:
@@ -218,7 +126,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 'val_auc': val_auc,
                 'val_acc': val_acc,
                 'val_acer': val_acer,
-            }, './new_models/best_model_mobilenetv4_pad.pth')
+            }, './new_models/best_model_mobilenetv3_pad.pth')
             print(f'New best model saved with ACER: {val_acer:.4f}')
     
     return model, history
@@ -273,11 +181,11 @@ def plot_training_history(history):
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig('./results/mobilenetv4_training_history.png')
+    plt.savefig('./results/mobiletnetv3_training_history.png')
     plt.show()
 
 def plot_roc_curve(model, val_loader, device):
-    """Plot ROC curve for the model using validation data"""
+    '''Plot ROC curve for the model using validation data'''
     model.eval()
     all_labels = []
     all_scores = []
@@ -307,9 +215,9 @@ def plot_roc_curve(model, val_loader, device):
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
     plt.title('Receiver Operating Characteristic (ROC) Curve')
-    plt.legend(loc="lower right")
+    plt.legend(loc='lower right')
     plt.grid(True)
-    plt.savefig('./results/mobilenetv4_roc_curve.png')
+    plt.savefig('./results/mobilenetv3_roc_curve.png')
     plt.show()
     
     return roc_auc, fpr, tpr, thresholds
@@ -337,8 +245,9 @@ def calculate_far_frr_acer(labels, predictions):
     return far, frr, acer
 
 if __name__ == '__main__':
-    # Set device
+    # Set device and print info
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Using device: {device}')
     
     # Data loading and preprocessing
     transform = transforms.Compose([
@@ -348,61 +257,69 @@ if __name__ == '__main__':
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    # Initialize dataset
-    dataset_path = "VFPAD"  # Use same path as FeatherNet
+    dataset_path = 'VFPAD'
     
-    # Load training data - simplified like FeatherNet
+    # Load training data with checks
     train_dataset = VFPADDataset(dataset_path, protocol='grandtest', subset='train')
     train_samples = train_dataset.load_data()
-    train_torch_dataset = VFPADTorchDataset(train_samples, transform=transform)
     
-    # Load validation data - simplified like FeatherNet
+    if not train_samples:
+        raise ValueError('No training samples were loaded! Check dataset path and structure.')
+    print(f'Loaded {len(train_samples)} training samples')
+    
+    # Load validation data with checks
     val_dataset = VFPADDataset(dataset_path, protocol='grandtest', subset='dev')
     val_samples = val_dataset.load_data()
+    
+    if not val_samples:
+        raise ValueError('No validation samples were loaded! Check dataset path and structure.')
+    print(f'Loaded {len(val_samples)} validation samples')
+    
+    # Create datasets with size checks
+    train_torch_dataset = VFPADTorchDataset(train_samples, transform=transform)
     val_torch_dataset = VFPADTorchDataset(val_samples, transform=transform)
     
-    # Print dataset sizes for verification
-    print(f"\nDataset sizes:")
-    print(f"Training samples: {len(train_torch_dataset)}")
-    print(f"Validation samples: {len(val_torch_dataset)}")
+    print(f'Train dataset size: {len(train_torch_dataset)}')
+    print(f'Validation dataset size: {len(val_torch_dataset)}')
     
-    # Create data loaders
-    train_loader = DataLoader(
-        train_torch_dataset,
-        batch_size=32,
-        shuffle=True,
-        num_workers=4,
-        pin_memory=True
-    )
+    # Create data loaders with error checking
+    if len(train_torch_dataset) > 0:
+        train_loader = DataLoader(
+            train_torch_dataset,
+            batch_size=32,
+            shuffle=True,
+            num_workers=4,
+            pin_memory=True
+        )
+    else:
+        raise ValueError('Training dataset is empty!')
     
-    val_loader = DataLoader(
-        val_torch_dataset,
-        batch_size=32,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
+    if len(val_torch_dataset) > 0:
+        val_loader = DataLoader(
+            val_torch_dataset,
+            batch_size=32,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True
+        )
+    else:
+        raise ValueError('Validation dataset is empty!')
     
     # Initialize model with pretrained weights
-    model = MobileNetV4PAD(num_classes=1, pretrained=True)
+    model = MobileNetV3PAD(pretrained=True, num_classes=1)
     model = model.to(device)
+    print('Model initialized and moved to device')
     
-    # Phase 1: Train only the new layers
+    # Phase 1: Train only new layers
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.AdamW([
-        {'params': model.attention.parameters(), 'lr': 3e-4},
-        {'params': model.classifier.parameters(), 'lr': 3e-4}
-    ], weight_decay=0.01)
-
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='max',
-        factor=0.5,
-        patience=3,
-        verbose=True
-    )
+    optimizer = optim.Adam([
+        {'params': model.attention.parameters()},
+        {'params': model.classifier.parameters()}
+    ], lr=0.001)
     
-    print("Phase 1: Training new layers...")
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+    
+    print('Phase 1: Training new layers...')
     model, history_phase1 = train_model(
         model=model,
         train_loader=train_loader,
@@ -415,22 +332,16 @@ if __name__ == '__main__':
     )
     
     # Phase 2: Fine-tune the model
-    print("Phase 2: Fine-tuning...")
+    print('Phase 2: Fine-tuning...')
     model.unfreeze_layers(num_layers=10)  # Unfreeze last 10 layers
     
-    optimizer = optim.AdamW([
-        {'params': model.backbone.parameters(), 'lr': 1e-4},
-        {'params': model.attention.parameters(), 'lr': 3e-4},
-        {'params': model.classifier.parameters(), 'lr': 3e-4}
-    ], weight_decay=0.01)
-
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode='max',
-        factor=0.5,
-        patience=3,
-        verbose=True
-    )
+    optimizer = optim.Adam([
+        {'params': model.backbone.parameters(), 'lr': 1e-5},
+        {'params': model.attention.parameters(), 'lr': 1e-4},
+        {'params': model.classifier.parameters(), 'lr': 1e-4}
+    ])
+    
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
     
     model, history_phase2 = train_model(
         model=model,
@@ -457,15 +368,16 @@ if __name__ == '__main__':
         'val_acer': history_phase1['val_acer'] + history_phase2['val_acer']
     }
 
-    print("\nComputing ROC curve...")
+    print('\nComputing ROC curve...')
     roc_auc, fpr, tpr, thresholds = plot_roc_curve(model, val_loader, device)
 
     operating_points = [0.1, 0.05, 0.01]  # FPR targets
-    print("\nOperating points:")
+    print('\nOperating points:')
     for target_fpr in operating_points:
         idx = np.argmin(np.abs(fpr - target_fpr))
-        print(f"At FPR = {fpr[idx]:.4f}:")
-        print(f"  TPR = {tpr[idx]:.4f}")
-        print(f"  Threshold = {thresholds[idx]:.4f}")
+        print(f'At FPR = {fpr[idx]:.4f}:')
+        print(f'  TPR = {tpr[idx]:.4f}')
+        print(f'  Threshold = {thresholds[idx]:.4f}')
     
+
     plot_training_history(history)
