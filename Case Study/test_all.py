@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_score
@@ -8,12 +7,12 @@ from tqdm import tqdm
 from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
 
 # Import all model architectures
-from feathernet_test import FeatherNetPAD
-from mobilenetv3_test import MobileNetV3PAD
-from mobilenetv4_test import MobileNetV4PAD
-from mobilevitv3_test import MobileViTV3PAD
-from minifasnetv2_test import MiniFASNetV2PAD
-from efficientnetv2b0_test import EfficientNetV2PAD
+from models.feathernetb import FeatherNetPAD
+from models.mobilenetv3 import MobileNetV3PAD
+from models.mobilenetv4 import MobileNetV4PAD
+from models.mobilevitv3 import MobileViTV3PAD
+from models.minifasnetv2 import MiniFASNetV2PAD
+from models.efficientnetv2b0 import EfficientNetV2PAD
 
 def evaluate_model(model, test_loader, device):
     """Evaluate model on test set"""
