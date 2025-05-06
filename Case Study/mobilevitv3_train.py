@@ -2,89 +2,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from sklearn.metrics import roc_curve, auc, precision_score, recall_score, f1_score
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from dataset.VFPAD_data import VFPADDataset, VFPADTorchDataset
-import timm
-
-class EfficientNetV2PAD(nn.Module):
-    def __init__(self, num_classes=1, pretrained=True):
-        super(EfficientNetV2PAD, self).__init__()
-        # Initialize backbone with pretrained weights
-        self.backbone = timm.create_model('tf_efficientnetv2_b0', pretrained=pretrained, num_classes=0)
-        
-        # Get feature dimension
-        feature_dim = 1280
-        
-        # Remove original classifier
-        self.backbone.classifier = nn.Identity()
-        self.backbone.global_pool = nn.Identity()
-        
-        # Add global pooling
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
-        
-        # Freeze backbone initially
-        if pretrained:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
-        
-        # Attention mechanism
-        self.attention = nn.Sequential(
-            nn.Linear(feature_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.SiLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.SiLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(256, 1),
-            nn.Sigmoid()
-        )
-        
-        # Classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(feature_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.SiLU(inplace=True),
-            nn.Dropout(0.5),
-            nn.Linear(512, num_classes)
-        )
-
-    def unfreeze_layers(self, num_layers=None):
-        """Unfreeze layers for fine-tuning"""
-        if num_layers is None:
-            # Unfreeze all backbone layers
-            for param in self.backbone.parameters():
-                param.requires_grad = True
-                print("Unfroze all backbone layers")
-        else:
-            # Unfreeze last n layers
-            layers = list(self.backbone.named_parameters())
-            for name, param in layers[-num_layers:]:
-                param.requires_grad = True
-                print(f"Unfroze layer: {name}")
-
-    def forward(self, x):
-        # Get features from backbone
-        features = self.backbone(x)
-        
-        # Apply global pooling and flatten
-        features = self.global_pool(features)
-        features = torch.flatten(features, 1)
-        
-        # Apply attention
-        attention = self.attention(features)
-        
-        # Get classification output
-        out = self.classifier(features)
-        
-        # Apply attention
-        return out * attention
-    
+from models.mobilevitv3 import MobileViTV3PAD
+   
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs=10, device='cuda'):
     """Training function for the PAD model"""
     best_acer = float('inf')
@@ -212,7 +137,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 'val_auc': val_auc,
                 'val_acc': val_acc,
                 'val_acer': val_acer,
-            }, './new_models/best_model_efficientnetv2_pad.pth')
+            }, './new_models/best_model_mobilevitv3_pad.pth')
             print(f'New best model saved with ACER: {val_acer:.4f}')
     
     return model, history
@@ -267,7 +192,7 @@ def plot_training_history(history):
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig('./results/efficientnetv2_training_history.png')
+    plt.savefig('./results/mobilevitv3_training_history.png')
     plt.show()
 
 def plot_roc_curve(model, val_loader, device):
@@ -303,7 +228,7 @@ def plot_roc_curve(model, val_loader, device):
     plt.title('Receiver Operating Characteristic (ROC) Curve')
     plt.legend(loc="lower right")
     plt.grid(True)
-    plt.savefig('./results/efficientv2_roc_curve.png')
+    plt.savefig('./results/mobilevitv3_roc_curve.png')
     plt.show()
     
     return roc_auc, fpr, tpr, thresholds
@@ -329,7 +254,7 @@ def calculate_far_frr_acer(labels, predictions):
     acer = (far + frr) / 2
     
     return far, frr, acer
-    
+
 if __name__ == '__main__':
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -371,9 +296,9 @@ if __name__ == '__main__':
         num_workers=4,
         pin_memory=True
     )
-
+    
     # Initialize model
-    model = EfficientNetV2PAD(num_classes=1, pretrained=True)
+    model = MobileViTV3PAD(num_classes=1, pretrained=True)
     model = model.to(device)
     
     # Phase 1: Train only the new layers
@@ -420,7 +345,7 @@ if __name__ == '__main__':
         patience=3,
         verbose=True
     )
-    
+
     model, history_phase2 = train_model(
         model=model,
         train_loader=train_loader,
@@ -432,7 +357,6 @@ if __name__ == '__main__':
         device=device
     )
     
-    # Combine histories
     history = {
         'train_loss': history_phase1['train_loss'] + history_phase2['train_loss'],
         'val_loss': history_phase1['val_loss'] + history_phase2['val_loss'],
@@ -447,11 +371,10 @@ if __name__ == '__main__':
         'val_acer': history_phase1['val_acer'] + history_phase2['val_acer']
     }
 
-    # Plot results
     print("\nComputing ROC curve...")
     roc_auc, fpr, tpr, thresholds = plot_roc_curve(model, val_loader, device)
 
-    operating_points = [0.1, 0.05, 0.01]
+    operating_points = [0.1, 0.05, 0.01]  # FPR targets
     print("\nOperating points:")
     for target_fpr in operating_points:
         idx = np.argmin(np.abs(fpr - target_fpr))
