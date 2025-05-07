@@ -1,0 +1,54 @@
+Brotli @ file:///croot/brotli-split_1714483155106/work
+certifi @ file:///croot/certifi_1725551672989/work/certifi
+charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+contourpy @ file:///opt/conda/conda-bld/contourpy_1663827406301/work
+cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
+einops==0.8.1
+filelock @ file:///croot/filelock_1700591183607/work
+fonttools @ file:///croot/fonttools_1713551344105/work
+fsspec==2025.3.0
+gmpy2 @ file:///tmp/build/80754af9/gmpy2_1645455532332/work
+h5py @ file:///croot/h5py_1715094721489/work
+huggingface-hub==0.30.2
+idna @ file:///croot/idna_1714398848350/work
+importlib_resources @ file:///croot/importlib_resources-suite_1720641103994/work
+Jinja2 @ file:///croot/jinja2_1716993405101/work
+joblib @ file:///croot/joblib_1718217211762/work
+kiwisolver @ file:///croot/kiwisolver_1672387140495/work
+MarkupSafe @ file:///croot/markupsafe_1704205993651/work
+matplotlib @ file:///croot/matplotlib-suite_1693812469450/work
+mkl-fft @ file:///croot/mkl_fft_1695058164594/work
+mkl-random @ file:///croot/mkl_random_1695059800811/work
+mkl-service==2.4.0
+mpmath @ file:///croot/mpmath_1690848262763/work
+networkx @ file:///croot/networkx_1690561992265/work
+numpy @ file:///work/mkl/numpy_and_numpy_base_1682952636358/work
+packaging @ file:///croot/packaging_1720101850331/work
+pillow @ file:///croot/pillow_1721059439630/work
+ply==3.11
+pyparsing @ file:///opt/conda/conda-bld/pyparsing_1661452539315/work
+PyQt5==5.15.10
+PyQt5-sip @ file:///croot/pyqt-split_1698769088074/work/pyqt_sip
+PySocks @ file:///tmp/build/80754af9/pysocks_1605305779399/work
+python-dateutil @ file:///croot/python-dateutil_1716495738603/work
+PyYAML @ file:///croot/pyyaml_1728657952215/work
+requests @ file:///croot/requests_1721410876868/work
+safetensors==0.5.3
+scikit-learn @ file:///croot/scikit-learn_1684954695550/work
+scipy==1.9.3
+sip @ file:///croot/sip_1698675935381/work
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+sympy @ file:///croot/sympy_1734622612703/work
+threadpoolctl @ file:///croot/threadpoolctl_1719407800858/work
+timm==1.0.15
+tomli @ file:///opt/conda/conda-bld/tomli_1657175507142/work
+torch==2.4.1
+torchaudio==2.4.1
+torchvision==0.20.0
+tornado @ file:///croot/tornado_1718740109488/work
+tqdm @ file:///croot/tqdm_1724853939799/work
+triton==3.0.0
+typing_extensions @ file:///croot/typing_extensions_1715268824938/work
+unicodedata2 @ file:///croot/unicodedata2_1713212950228/work
+urllib3 @ file:///croot/urllib3_1727769808118/work
+zipp @ file:///croot/zipp_1729012354496/work
